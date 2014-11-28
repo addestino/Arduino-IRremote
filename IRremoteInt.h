@@ -16,6 +16,8 @@
 #ifndef IRremoteint_h
 #define IRremoteint_h
 
+#define TIMER4_HS_ALTERNATE
+
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
 #else
@@ -208,8 +210,22 @@ typedef struct {
 } 
 irparams_t;
 
+/*
+// information for the interrupt handler
+typedef struct {
+  uint8_t recvpin[MAX_SENSOR_COUNT];           // pin for IR data from detector
+  uint8_t rcvstate[MAX_SENSOR_COUNT];          // state machine
+  uint8_t blinkflag;         // TRUE to enable blinking of pin 13 on IR processing
+  unsigned int timer;     // state timer, counts 50uS ticks.
+  unsigned int rawbuf[MAX_SENSOR_COUNT][RAWBUF]; // raw data
+  uint8_t rawlen[MAX_SENSOR_COUNT];         // counter of entries in rawbuf
+} 
+irparams_t;
+*/
+
 // Defined in IRremote.cpp
 extern volatile irparams_t irparams;
+extern int sensor_count;
 
 // IR detector output is active low
 #define MARK  0
@@ -343,11 +359,31 @@ extern volatile irparams_t irparams;
 // defines for timer4 (10 bits, high speed option)
 #elif defined(IR_USE_TIMER4_HS)
 #define TIMER_RESET
-#define TIMER_ENABLE_PWM     (TCCR4A |= _BV(COM4A1))
-#define TIMER_DISABLE_PWM    (TCCR4A &= ~(_BV(COM4A1)))
 #define TIMER_ENABLE_INTR    (TIMSK4 = _BV(TOIE4))
 #define TIMER_DISABLE_INTR   (TIMSK4 = 0)
 #define TIMER_INTR_NAME      TIMER4_OVF_vect
+
+#ifdef TIMER4_HS_ALTERNATE
+
+#define TIMER_ENABLE_PWM     (TCCR4C |= _BV(COM4D1))
+#define TIMER_DISABLE_PWM    (TCCR4C &= ~(_BV(COM4D1)))
+#define TIMER_CONFIG_KHZ(val) ({ \
+  const uint16_t pwmval = SYSCLOCK / 2000 / (val); \
+  TCCR4A = 0; \
+  TCCR4B = _BV(CS40); \
+  TCCR4C = (1<<PWM4D); \
+  TCCR4D = (1<<WGM40); \
+  TCCR4E = 0; \
+  TC4H = pwmval >> 8; \
+  OCR4D = pwmval; \
+  TC4H = (pwmval / 3) >> 8; \
+  OCR4D = (pwmval / 3) & 255; \
+})
+
+#else //TIMER4_HS_ALTERNATE
+
+#define TIMER_ENABLE_PWM     (TCCR4A |= _BV(COM4A1))
+#define TIMER_DISABLE_PWM    (TCCR4A &= ~(_BV(COM4A1)))
 #define TIMER_CONFIG_KHZ(val) ({ \
   const uint16_t pwmval = SYSCLOCK / 2000 / (val); \
   TCCR4A = (1<<PWM4A); \
@@ -360,6 +396,9 @@ extern volatile irparams_t irparams;
   TC4H = (pwmval / 3) >> 8; \
   OCR4A = (pwmval / 3) & 255; \
 })
+
+#endif //TIMER4_HS_ALTERNATE
+
 #define TIMER_CONFIG_NORMAL() ({ \
   TCCR4A = 0; \
   TCCR4B = _BV(CS40); \
@@ -374,7 +413,11 @@ extern volatile irparams_t irparams;
 #if defined(CORE_OC4A_PIN)
 #define TIMER_PWM_PIN        CORE_OC4A_PIN  /* Teensy */
 #elif defined(__AVR_ATmega32U4__)
+#ifdef TIMER4_HS_ALTERNATE
+#define TIMER_PWM_PIN        6  /* Leonardo */
+#else
 #define TIMER_PWM_PIN        13  /* Leonardo */
+#endif
 #else
 #error "Please add OC4A pin number here\n"
 #endif
